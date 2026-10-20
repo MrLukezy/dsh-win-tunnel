@@ -1,0 +1,11 @@
+{
+    "serverHost": "pc.example.com",
+    "serverUser": "ubuntu",
+    "sshPort": 22,
+    "tunnelPort": 13081,
+    "localPort": 13080,
+    "publicUrl": "https://pc.example.com",
+    "trustedHost": "pc.example.com",
+    "sshKeyPath": "C:\\Users\\<你>\\.ssh\\id_ed25519",
+    "installDir": "C:\\dsh-win-tunnel"
+}

@@ -1,0 +1,71 @@
+# ============================================================
+#  由 dsh-win-tunnel/install.sh 渲染生成,请勿手工修改。
+#  需要调整请改 config.env 后重新执行 install.sh。
+# ============================================================
+
+# WebSocket 升级用。map 必须位于 http 上下文,
+# sites-enabled 下的文件正是被 include 进 http 的,所以放这里合法。
+map $http_upgrade $dsh_tunnel_connection {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Let's Encrypt 续期与首次签发的验证目录
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN};
+
+    ssl_certificate     ${CERT_DIR}/fullchain.pem;
+    ssl_certificate_key ${CERT_DIR}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:DshTunnel:10m;
+    ssl_session_timeout 1d;
+
+    # ── 第一道门:HTTP Basic Auth ──────────────────────────────
+    auth_basic           "DeepSeek Harness";
+    auth_basic_user_file ${AUTH_FILE};
+
+    client_max_body_size ${CLIENT_MAX_BODY};
+    client_body_timeout  3600s;
+
+    location / {
+        proxy_pass http://127.0.0.1:${TUNNEL_PORT};
+        proxy_http_version 1.1;
+
+        # ★★ Host 必须原样透传,绝对不能改成 127.0.0.1 ★★
+        #    dsh 的 browser-trust fence 用 Host 与 Origin 做同源校验,
+        #    改写 Host 会让 /api 全线 401,表现为"登录后白屏"。
+        proxy_set_header Host              $host;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $dsh_tunnel_connection;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE 与流式响应不能缓冲,否则对话会一卡一卡地整段蹦出来
+        proxy_buffering         off;
+        proxy_request_buffering off;
+        proxy_cache             off;
+
+        # 长任务与 WebSocket(/api/remote.mux)都需要长超时
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+
+        # 上游断开时不要反复重试,直接让浏览器看到结果
+        proxy_next_upstream off;
+    }
+}
