@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     dsh-win-tunnel · Windows 端一键配置
@@ -46,11 +46,25 @@ param(
     [string]$PublicUrl = "",
     [switch]$NoStart,
     [switch]$SkipKeySetup,
-    [string]$InstallDir = $PSScriptRoot
+    [string]$InstallDir = ""
 )
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# ── 安装目录兜底 ──
+# 不能直接在 param 默认值里用 $PSScriptRoot:PowerShell 5.1 在
+# `powershell -File script.ps1` 下求值参数默认值时,它可能还是空值。
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $InstallDir = $PSScriptRoot
+    } elseif ($MyInvocation.MyCommand.Path) {
+        $InstallDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    } else {
+        $InstallDir = (Get-Location).Path
+    }
+}
+Write-Host "  安装目录: $InstallDir" -ForegroundColor DarkGray
 
 # ─────────────────────────── 输出 ───────────────────────────
 function Write-Banner {
@@ -120,6 +134,21 @@ if (-not (Test-CommandExists 'dsh')) {
     Write-Ok "dsh 安装完成"
 } else {
     Write-Ok "dsh $(& dsh --version 2>$null | Select-Object -First 1)"
+}
+
+# ── 能力检测:老版本 dsh 没有 --trusted-host / --public-url ──
+# 这两个参数是浏览器信任校验与公网地址打印的关键,缺了会导致登录后白屏。
+$webHelp = (& dsh web --help 2>&1 | Out-String)
+if ($webHelp -notmatch 'trusted-host') {
+    Write-Fail "当前 dsh 版本过旧,不支持 --trusted-host / --public-url"
+    Write-Host "         这两个参数缺失会导致登录后接口全 401(白屏)。" -ForegroundColor Yellow
+    Write-Host "         请先升级:" -ForegroundColor Yellow
+    Write-Host "           npm i -g @deepseek-ai/dsh@latest" -ForegroundColor Green
+    exit 1
+}
+$HasPublicUrl = ($webHelp -match 'public-url')
+if (-not $HasPublicUrl) {
+    Write-Warn "当前 dsh 不支持 --public-url,将省略该参数;首次登录地址需从日志自行拼接"
 }
 
 if (-not (Test-CommandExists 'ssh')) {
@@ -209,13 +238,16 @@ $TunnelBat = Join-Path $InstallDir "run-tunnel.bat"
 $DshLog   = Join-Path $LogDir "dsh-web.log"
 $TunLog   = Join-Path $LogDir "tunnel.log"
 
+# 老版本 dsh 不认 --public-url,这种情况就不传,避免启动即报错
+$PublicUrlArg = if ($HasPublicUrl) { "--public-url $PublicUrl" } else { "" }
+
 $dshBatContent = @"
 @echo off
 chcp 65001 >nul
 title DSH Web ($LocalPort)
 cd /d "%~dp0"
 echo [%date% %time%] starting dsh web >> "$DshLog"
-dsh web --host 127.0.0.1 --port $LocalPort --no-open --public-url $PublicUrl --trusted-host $TrustedHost >> "$DshLog" 2>&1
+dsh web --host 127.0.0.1 --port $LocalPort --no-open $PublicUrlArg --trusted-host $TrustedHost >> "$DshLog" 2>&1
 echo [%date% %time%] dsh web exited with code %ERRORLEVEL% >> "$DshLog"
 "@
 Set-Content -Path $DshBat -Value $dshBatContent -Encoding ASCII
