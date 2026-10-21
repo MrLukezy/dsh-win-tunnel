@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Windows 端部署说明 · dsh-win-tunnel</title>
+<style>
+  :root{
+    --bg:#0e1014; --panel:#15181f; --panel2:#1b1f28; --border:#262b36;
+    --text:#e8eaed; --muted:#9aa3b2; --dim:#6b7280;
+    --accent:#4ea1ff; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
+    --code-bg:#0a0c10; --radius:12px;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:24px}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .layout{display:grid;grid-template-columns:248px minmax(0,1fr);max-width:1240px;margin:0 auto;gap:0}
+
+  /* ---------- 侧栏 ---------- */
+  aside{
+    position:sticky;top:0;height:100vh;overflow-y:auto;
+    padding:28px 20px 40px 24px;border-right:1px solid var(--border);
+  }
+  aside .brand{font-weight:700;font-size:15px;letter-spacing:.2px;margin-bottom:4px}
+  aside .brand span{color:var(--accent)}
+  aside .sub{font-size:12px;color:var(--dim);margin-bottom:22px}
+  nav a{
+    display:block;font-size:13.5px;color:var(--muted);
+    padding:6px 10px;border-radius:7px;border-left:2px solid transparent;
+    transition:.15s;margin-bottom:1px;
+  }
+  nav a:hover{background:var(--panel);color:var(--text);text-decoration:none}
+  nav a.active{color:var(--accent);background:rgba(78,161,255,.09);border-left-color:var(--accent)}
+  nav .group{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:18px 0 6px 10px}
+
+  /* ---------- 主区 ---------- */
+  main{padding:44px 48px 120px;min-width:0}
+  h1{font-size:30px;line-height:1.3;margin:0 0 10px;letter-spacing:-.4px}
+  h2{font-size:21px;margin:52px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border);letter-spacing:-.2px}
+  h3{font-size:16px;margin:28px 0 10px;color:#cfd6e2}
+  p{margin:12px 0}
+  ul,ol{margin:12px 0;padding-left:22px}
+  li{margin:6px 0}
+  code{font-family:var(--mono);font-size:13px;background:var(--panel2);padding:2px 6px;border-radius:5px;color:#c9d6e8}
+  .lead{font-size:16px;color:var(--muted);margin-bottom:26px}
+
+  /* ---------- 信息卡 ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:22px 0}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+  .card .k{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+  .card .v{font-family:var(--mono);font-size:14px;color:var(--text);word-break:break-all}
+  .card .v.accent{color:var(--accent)}
+
+  /* ---------- 提示框 ---------- */
+  .note{border-radius:10px;padding:14px 16px;margin:18px 0;border:1px solid;font-size:14px}
+  .note .t{font-weight:600;margin-bottom:5px;font-size:13.5px}
+  .note p:first-of-type{margin-top:0}.note p:last-child{margin-bottom:0}
+  .note.info{background:rgba(78,161,255,.08);border-color:rgba(78,161,255,.28)}
+  .note.info .t{color:var(--accent)}
+  .note.ok{background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.28)}
+  .note.ok .t{color:var(--ok)}
+  .note.warn{background:rgba(251,191,36,.08);border-color:rgba(251,191,36,.28)}
+  .note.warn .t{color:var(--warn)}
+  .note.bad{background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.28)}
+  .note.bad .t{color:var(--bad)}
+
+  /* ---------- 代码块 ---------- */
+  .code{position:relative;margin:16px 0;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--code-bg)}
+  .code .bar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--border);
+    font-size:11.5px;color:var(--dim);letter-spacing:.04em;
+  }
+  .code pre{margin:0;padding:15px 16px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.7;color:#cdd9ea}
+  .code pre .c{color:#5f6b7f}
+  .code pre .s{color:#8fd18f}
+  .code pre .k{color:#7fb4ff}
+  .copy{
+    background:transparent;border:1px solid var(--border);color:var(--muted);
+    font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;font-family:inherit;
+  }
+  .copy:hover{background:var(--panel2);color:var(--text)}
+  .copy.done{border-color:var(--ok);color:var(--ok)}
+
+  /* ---------- 步骤 ---------- */
+  .step{display:flex;gap:16px;margin:26px 0}
+  .step .num{
+    flex:0 0 30px;height:30px;border-radius:50%;display:grid;place-items:center;
+    background:rgba(78,161,255,.14);color:var(--accent);font-weight:700;font-size:14px;
+    border:1px solid rgba(78,161,255,.3);margin-top:3px;
+  }
+  .step .body{min-width:0;flex:1}
+  .step .body h3{margin-top:0}
+
+  /* ---------- 表格 ---------- */
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--dim);font-weight:600;font-size:12px;letter-spacing:.05em;text-transform:uppercase}
+  tbody tr:hover{background:rgba(255,255,255,.015)}
+  td code{font-size:12.5px}
+
+  /* ---------- 架构链 ---------- */
+  .chain{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:22px 0;font-size:13px}
+  .chain .node{
+    background:var(--panel);border:1px solid var(--border);border-radius:9px;
+    padding:9px 13px;font-family:var(--mono);font-size:12.5px;
+  }
+  .chain .node.hl{border-color:rgba(78,161,255,.45);color:var(--accent)}
+  .chain .arrow{color:var(--dim)}
+
+  /* ---------- 折叠 ---------- */
+  details{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin:10px 0}
+  details summary{cursor:pointer;font-weight:600;font-size:14px;color:#cfd6e2;list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:"▸ ";color:var(--dim)}
+  details[open] summary::before{content:"▾ "}
+  details .inner{margin-top:10px;color:var(--muted);font-size:14px}
+
+  .muted{color:var(--muted)}
+  .small{font-size:12.5px}
+  hr{border:0;border-top:1px solid var(--border);margin:36px 0}
+  .foot{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);color:var(--dim);font-size:12.5px}
+
+  /* ---------- 移动端 ---------- */
+  .mobile-bar{display:none}
+  @media (max-width:900px){
+    .layout{grid-template-columns:1fr}
+    aside{display:none;position:static;height:auto;border-right:0;border-bottom:1px solid var(--border)}
+    aside.open{display:block}
+    main{padding:24px 20px 80px}
+    h1{font-size:24px}
+    .mobile-bar{
+      display:flex;align-items:center;justify-content:space-between;
+      position:sticky;top:0;z-index:20;background:var(--bg);
+      border-bottom:1px solid var(--border);padding:12px 18px;
+    }
+    .mobile-bar button{
+      background:var(--panel);border:1px solid var(--border);color:var(--text);
+      padding:6px 14px;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;
+    }
+    .code pre{font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<div class="mobile-bar">
+  <strong>Windows 端部署说明</strong>
+  <button id="tocToggle">目录</button>
+</div>
+
+<div class="layout">
+<aside id="side">
+  <div class="brand">dsh-<span>win</span>-tunnel</div>
+  <div class="sub">Windows 端操作手册</div>
+  <nav id="nav">
+    <a href="#overview">这是什么</a>
+    <a href="#target">本次部署目标</a>
+    <a href="#prereq">前置检查</a>
+    <div class="group">部署</div>
+    <a href="#step1">1 · 准备文件</a>
+    <a href="#step2">2 · 一键配置</a>
+    <a href="#step3">3 · 首次登录</a>
+    <div class="group">运维</div>
+    <a href="#verify">验证链路</a>
+    <a href="#daily">日常操作</a>
+    <a href="#faq">常见问题</a>
+    <a href="#security">安全须知</a>
+  </nav>
+</aside>
+
+<main>
+
+<h1>Windows 端部署说明</h1>
+<p class="lead">把家里这台 Windows 上的 DeepSeek Harness，通过 SSH 反向隧道接到服务器，让你在任何地方用浏览器打开它，并让 agent 直接操作本机的文件和软件。</p>
+
+<h2 id="overview">这是什么</h2>
+
+<p>整个链路是这样走的，<strong>全部由 PC 主动连出</strong>，家里不需要公网 IP，路由器不用做端口映射：</p>
+
+<div class="chain">
+  <div class="node">你的浏览器</div>
+  <div class="arrow">→</div>
+  <div class="node">服务器 nginx :8443</div>
+  <div class="arrow">→</div>
+  <div class="node hl">127.0.0.1:13081</div>
+  <div class="arrow">⇠ 隧道</div>
+  <div class="node">本机 dsh :13080</div>
+</div>
+
+<p>PC 上只做两件事：跑一个 <code>dsh web</code>，再跑一条 <code>ssh -R</code> 把本地端口送到服务器。浏览器访问的是服务器，看到的是本机的 dsh。</p>
+
+<div class="note info">
+  <div class="t">为什么必须用隧道</div>
+  <p>DeepSeek Harness 是「Host 监听 / Peer 连入」的模型，没有让一个节点主动连回另一个节点的能力。所以「PC 连回服务器」这一层只能由隧道承担，这也是本项目存在的唯一理由。</p>
+</div>
+
+<h2 id="target">本次部署目标</h2>
+
+<p>这台 Windows 要接入的服务器，参数如下（脚本已经按这些值配好，直接照抄即可）：</p>
+
+<div class="grid">
+  <div class="card">
+    <div class="k">对外访问地址</div>
+    <div class="v accent">https://YOUR_DOMAIN:8443</div>
+  </div>
+  <div class="card">
+    <div class="k">服务器 / SSH 主机</div>
+    <div class="v">YOUR_DOMAIN</div>
+  </div>
+  <div class="card">
+    <div class="k">SSH 用户名</div>
+    <div class="v">ubuntu</div>
+  </div>
+  <div class="card">
+    <div class="k">SSH 端口</div>
+    <div class="v">22</div>
+  </div>
+  <div class="card">
+    <div class="k">隧道端口</div>
+    <div class="v">13081</div>
+  </div>
+  <div class="card">
+    <div class="k">本机 dsh 端口</div>
+    <div class="v">13080</div>
+  </div>
+  <div class="card">
+    <div class="k">登录墙账号</div>
+    <div class="v">dsh</div>
+  </div>
+  <div class="card">
+    <div class="k">登录墙密码</div>
+    <div class="v muted">见服务器端安装时的打印输出</div>
+  </div>
+</div>
+
+<div class="note warn">
+  <div class="t">密码不在本文档里</div>
+  <p>这个页面部署在公网，所以登录墙密码不写进来。它在服务器端执行 <code>install.sh</code> 时只打印过一次，如果你已经丢了，去服务器上重跑一次安装、在 <code>config.env</code> 里显式设置 <code>AUTH_PASS</code> 即可重置。</p>
+</div>
+
+<h2 id="prereq">前置检查</h2>
+
+<p>在 Windows 上打开 <strong>PowerShell</strong>（开始菜单搜 PowerShell，右键选「以管理员身份运行」），逐条确认：</p>
+
+<h3>1. Node.js 22 LTS</h3>
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code>node --version</code></pre>
+</div>
+<p>要求 <code>v20</code> 以上，推荐 <code>v22</code>。没装就执行：</p>
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code>winget install OpenJS.NodeJS.LTS</code></pre>
+</div>
+<p class="small muted">装完必须<strong>关掉这个窗口重新开一个</strong>，否则 PATH 还是旧的。</p>
+
+<h3>2. OpenSSH 客户端</h3>
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code>ssh -V</code></pre>
+</div>
+<p>没输出就去「设置 → 应用 → 可选功能 → 添加功能」，找到 <strong>OpenSSH 客户端</strong> 安装。</p>
+
+<h3>3. 能连到服务器</h3>
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code>Test-NetConnection YOUR_DOMAIN -Port 22</code></pre>
+</div>
+<p><code>TcpTestSucceeded</code> 必须是 <code>True</code>。如果是 False，先解决网络或防火墙，后面的步骤都会卡在这里。</p>
+
+<h2 id="step1">第一步：准备文件</h2>
+
+<p>把仓库里的 <code>windows</code> 目录拷到本机，建议固定放在 <code>C:\dsh-win-tunnel</code>：</p>
+
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code><span class="c"># 方式一：有 git</span>
+git clone https://github.com/YOUR_ORG/dsh-win-tunnel.git C:\dsh-win-src
+<span class="k">New-Item</span> -ItemType Directory -Force C:\dsh-win-tunnel | Out-Null
+<span class="k">Copy-Item</span> C:\dsh-win-src\windows\* C:\dsh-win-tunnel\ -Recurse -Force
+
+<span class="c"># 方式二：没有 git，直接浏览器下载 zip 后手动解压</span>
+<span class="c"># 把 windows 目录里的文件放进 C:\dsh-win-tunnel</span></code></pre>
+</div>
+
+<p>目录里应该有这些文件：</p>
+<ul class="small">
+  <li><code>setup.ps1</code> —— 一键配置</li>
+  <li><code>check.ps1</code> —— 链路体检</li>
+  <li><code>uninstall.ps1</code> —— 卸载</li>
+  <li><code>config.example.json</code> —— 配置样例（不用手改）</li>
+</ul>
+
+<h2 id="step2">第二步：一键配置</h2>
+
+<p>在 <code>C:\dsh-win-tunnel</code> 目录里执行。建议<strong>用管理员权限的 PowerShell</strong>，否则计划任务可能注册失败：</p>
+
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code><span class="k">cd</span> C:\dsh-win-tunnel
+powershell -ExecutionPolicy Bypass -File setup.ps1 `
+  -ServerHost YOUR_DOMAIN `
+  -ServerUser ubuntu `
+  -TunnelPort 13081 `
+  -PublicUrl https://YOUR_DOMAIN:8443</code></pre>
+</div>
+
+<p>脚本会依次做这些事，中途只需要你输一次服务器密码：</p>
+
+<table>
+  <thead><tr><th>阶段</th><th>动作</th><th>你要做什么</th></tr></thead>
+  <tbody>
+    <tr><td>环境检查</td><td>确认 Node / dsh / OpenSSH</td><td>无，缺 dsh 会自动 <code>npm i -g</code></td></tr>
+    <tr><td>生成密钥</td><td>在 <code>~/.ssh/id_ed25519</code> 生成 SSH 密钥</td><td>无，已有则复用</td></tr>
+    <tr><td>部署公钥</td><td>把公钥追加到服务器 <code>authorized_keys</code></td><td><strong>输一次服务器登录密码</strong></td></tr>
+    <tr><td>写配置</td><td>生成 <code>config.json</code> 与两个启动脚本</td><td>无</td></tr>
+    <tr><td>注册自启</td><td>两个登录后自动启动的计划任务</td><td>无</td></tr>
+    <tr><td>启动并取 token</td><td>拉起 dsh 与隧道，从日志抓首次登录地址</td><td>无，等几分钟</td></tr>
+  </tbody>
+</table>
+
+<div class="note info">
+  <div class="t">首次启动会慢</div>
+  <p><code>dsh web</code> 第一次运行要创建 profile 并安装插件，几分钟属正常。脚本最多等 300 秒，期间窗口最小化是正常的，不要关它。</p>
+</div>
+
+<p>成功时最后会打印一条这样的地址，<strong>立刻复制下来</strong>：</p>
+
+<div class="code">
+  <div class="bar"><span>输出示例</span></div>
+  <pre><code>https://YOUR_DOMAIN:8443/?token=aBcD1234...</code></pre>
+</div>
+
+<h2 id="step3">第三步：首次登录</h2>
+
+<ol>
+  <li>浏览器打开上一步那条带 <code>?token=</code> 的完整地址</li>
+  <li>先弹出一个 <strong>HTTP 认证框</strong>，输入登录墙账号 <code>dsh</code> 和那个密码</li>
+  <li>页面加载后，浏览器已经种下 cookie，以后直接访问 <code>https://YOUR_DOMAIN:8443</code> 即可</li>
+</ol>
+
+<div class="note ok">
+  <div class="t">证书应该是正常的</div>
+  <p>这条链路复用服务器上 <code>YOUR_DOMAIN</code> 的 Let's Encrypt 证书，浏览器<strong>不应该</strong>出现「连接不是私密连接」。如果你看到了证书警告，说明你访问的是 IP 而不是域名，检查地址栏。</p>
+</div>
+
+<div class="note warn">
+  <div class="t">token 会随 dsh 重启变化</div>
+  <p>已经种过 cookie 的浏览器不受影响。换浏览器、清 cookie、或者换设备时，需要重新从日志里取一次 token。</p>
+</div>
+
+<h2 id="verify">验证链路</h2>
+
+<p>任何时候怀疑出问题，先跑体检。它会逐段告诉你断在哪：</p>
+
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code><span class="k">cd</span> C:\dsh-win-tunnel
+powershell -ExecutionPolicy Bypass -File check.ps1</code></pre>
+</div>
+
+<p>输出会按顺序检查四段：</p>
+
+<table>
+  <thead><tr><th>检查项</th><th>正常表现</th><th>失败含义</th></tr></thead>
+  <tbody>
+    <tr><td>本机 dsh 端口</td><td><code>[PASS] 127.0.0.1:13080 可连接</code></td><td>dsh web 没在跑</td></tr>
+    <tr><td>dsh 进程</td><td>发现 1 个以上 node 进程</td><td>进程崩了</td></tr>
+    <tr><td>隧道进程</td><td>发现 ssh.exe 且带 <code>-R 13081</code></td><td>隧道没起来</td></tr>
+    <tr><td>公网入口</td><td><code>返回 401</code>（登录墙正常）</td><td>502 = 隧道断了</td></tr>
+  </tbody>
+</table>
+
+<h2 id="daily">日常操作</h2>
+
+<div class="grid">
+  <div class="card"><div class="k">看 dsh 日志</div><div class="v">C:\dsh-win-tunnel\logs\dsh-web.log</div></div>
+  <div class="card"><div class="k">看隧道日志</div><div class="v">C:\dsh-win-tunnel\logs\tunnel.log</div></div>
+  <div class="card"><div class="k">手动启动 dsh</div><div class="v">run-dsh.bat</div></div>
+  <div class="card"><div class="k">手动启动隧道</div><div class="v">run-tunnel.bat</div></div>
+</div>
+
+<h3>开机自启</h3>
+<p>脚本注册了两个计划任务，登录后 20 秒自动启动：</p>
+<ul class="small">
+  <li><code>DshWinTunnel-DshWeb</code></li>
+  <li><code>DshWinTunnel-Tunnel</code></li>
+</ul>
+
+<div class="code">
+  <div class="bar"><span>PowerShell · 查看任务</span><button class="copy">复制</button></div>
+  <pre><code>schtasks /Query /TN DshWinTunnel-DshWeb /V /FO LIST
+schtasks /Query /TN DshWinTunnel-Tunnel /V /FO LIST</code></pre>
+</div>
+
+<p>隧道脚本内部是死循环，断开后 5 秒自动重连，所以 PC 断网恢复后不需要人工干预。</p>
+
+<h3>改配置</h3>
+<p>重新执行一遍 <code>setup.ps1</code> 并传入新参数即可，它会覆盖 <code>config.json</code> 与两个 bat、并重建计划任务。</p>
+
+<h3>卸载</h3>
+<div class="code">
+  <div class="bar"><span>PowerShell</span><button class="copy">复制</button></div>
+  <pre><code><span class="k">cd</span> C:\dsh-win-tunnel
+powershell -ExecutionPolicy Bypass -File uninstall.ps1 -PurgeFiles</code></pre>
+</div>
+<p class="small muted">会删除计划任务、结束进程、清理生成的配置与日志。不会动你的 SSH 密钥和已安装的 dsh。</p>
+
+<h2 id="faq">常见问题</h2>
+
+<details>
+  <summary>浏览器打开是 502 Bad Gateway</summary>
+  <div class="inner">
+    <p>nginx 活着，但连不上隧道的落点。先看 PC 上隧道进程在不在：</p>
+    <div class="code"><div class="bar"><span>PowerShell</span><button class="copy">复制</button></div><pre><code>Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" | Select-Object ProcessId, CommandLine</code></pre></div>
+    <p>没有就双击 <code>run-tunnel.bat</code>。再看 <code>logs\tunnel.log</code> 的最后几行，常见报错对照：</p>
+    <ul class="small">
+      <li><code>Permission denied (publickey)</code> → 公钥没部署上，重跑 setup.ps1</li>
+      <li><code>remote port forwarding failed</code> → 服务器上 13081 被占用</li>
+      <li><code>Connection refused</code> → SSH 端口不对</li>
+      <li><code>Operation timed out</code> → 网络不通或域名解析错</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>能登录，但页面白屏、接口全 401</summary>
+  <div class="inner">
+    <p>原因是 DSH 的浏览器信任校验（Host 与 Origin 必须同源）。检查 PC 上启动参数里有没有 <code>--trusted-host</code>：</p>
+    <div class="code"><div class="bar"><span>PowerShell</span><button class="copy">复制</button></div><pre><code>Get-Content C:\dsh-win-tunnel\run-dsh.bat | Select-String "trusted-host"</code></pre></div>
+    <p>应该能看到 <code>--trusted-host YOUR_DOMAIN:8443</code>。少了就重跑 <code>setup.ps1</code>。</p>
+  </div>
+</details>
+
+<details>
+  <summary>看不到第一次的 token 了</summary>
+  <div class="inner">
+    <div class="code"><div class="bar"><span>PowerShell</span><button class="copy">复制</button></div><pre><code>Select-String -Path C:\dsh-win-tunnel\logs\dsh-web.log -Pattern "token=" | Select-Object -Last 3</code></pre></div>
+    <p>拿到后拼成 <code>https://YOUR_DOMAIN:8443/?token=那串字符</code> 打开一次。</p>
+  </div>
+</details>
+
+<details>
+  <summary>重启电脑后连不上</summary>
+  <div class="inner">
+    <p>计划任务默认在<strong>用户登录后</strong>触发。如果 PC 重启后停在登录界面没人登，就不会启动。确认方式：</p>
+    <div class="code"><div class="bar"><span>PowerShell</span><button class="copy">复制</button></div><pre><code>schtasks /Query /TN DshWinTunnel-Tunnel /V /FO LIST | Select-String "Status","Last Run"</code></pre></div>
+    <p>状态是 <code>Ready</code> 且 <code>Last Run Time</code> 很旧，说明没跑过。登录一次即可。</p>
+  </div>
+</details>
+
+<details>
+  <summary>agent 执行 shell 命令报 bash 找不到</summary>
+  <div class="inner">
+    <p>这是 Windows 的固有限制：dsh 的 bash 工具是硬编码的 <code>bash -c</code>，Windows 没有 bash。</p>
+    <p>两个选择：</p>
+    <ul class="small">
+      <li>装 WSL：<code>wsl --install</code>，之后能用 <code>wsl -e bash -lc "..."</code></li>
+      <li>只用 PowerShell 那套工具，不依赖 bash</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>电脑休眠后连接断了</summary>
+  <div class="inner">
+    <p>休眠会终止所有网络连接。到「电源和电池 → 屏幕和睡眠」把<strong>睡眠设为「从不」</strong>。锁屏不影响，dsh 和隧道都还在跑。</p>
+  </div>
+</details>
+
+<details>
+  <summary>对话卡住不输出，最后整段蹦出来</summary>
+  <div class="inner">
+    <p>这是 SSE 流式响应被缓冲了。服务器端 nginx 已经配了 <code>proxy_buffering off</code>，如果还出现，检查服务器上该 location 有没有被别的配置覆盖。</p>
+  </div>
+</details>
+
+<details>
+  <summary>想换回自签证书或换端口</summary>
+  <div class="inner">
+    <p>这些都在服务器端决定，跟 PC 无关。PC 端只需要改 <code>-PublicUrl</code> 后重跑 <code>setup.ps1</code>，隧道和其余配置会自动跟着变。</p>
+  </div>
+</details>
+
+<h2 id="security">安全须知</h2>
+
+<div class="note bad">
+  <div class="t">这台 PC 的 PowerShell 和文件系统等于交给了公网</div>
+  <p>agent 能执行命令、读写文件。请认真看完这几条再决定是否长期运行。</p>
+</div>
+
+<ul>
+  <li><strong>两层门都别拆</strong>：服务器 nginx 的 basic auth 是外门，DSH 自己的 token 是内门。删掉任何一个都等于裸奔。</li>
+  <li><strong>本机只绑 127.0.0.1</strong>：启动参数固定 <code>--host 127.0.0.1</code>，不要改成 <code>0.0.0.0</code>，否则家里的局域网也能直接连。</li>
+  <li><strong>密码别外传</strong>：这个页面在公网，任何登录到本页的人都能看到部署方式。密码只存在于你的记忆和服务器上。</li>
+  <li><strong>考虑再收紧</strong>：如果条件允许，在服务器安全组里把 8443 限制为只允许你常用出口 IP，或者叠一层 Tailscale / Cloudflare Access。</li>
+  <li><strong>不用的时侯停掉</strong>：跑 <code>uninstall.ps1</code> 或用计划任务禁用，比一直开着安全。</li>
+</ul>
+
+<hr>
+
+<h2 id="ref">附：完整命令速查</h2>
+
+<div class="code">
+  <div class="bar"><span>PowerShell · 全部命令</span><button class="copy">复制</button></div>
+  <pre><code><span class="c"># 环境</span>
+node --version
+ssh -V
+Test-NetConnection YOUR_DOMAIN -Port 22
+
+<span class="c"># 部署</span>
+cd C:\dsh-win-tunnel
+powershell -ExecutionPolicy Bypass -File setup.ps1 `
+  -ServerHost YOUR_DOMAIN `
+  -ServerUser ubuntu `
+  -TunnelPort 13081 `
+  -PublicUrl https://YOUR_DOMAIN:8443
+
+<span class="c"># 体检</span>
+powershell -ExecutionPolicy Bypass -File check.ps1
+
+<span class="c"># 日志</span>
+Get-Content C:\dsh-win-tunnel\logs\tunnel.log -Tail 20
+Get-Content C:\dsh-win-tunnel\logs\dsh-web.log -Tail 20
+
+<span class="c"># 取 token</span>
+Select-String -Path C:\dsh-win-tunnel\logs\dsh-web.log -Pattern "token=" | Select-Object -Last 1
+
+<span class="c"># 手动重启</span>
+Start-Process C:\dsh-win-tunnel\run-tunnel.bat -WindowStyle Minimized
+
+<span class="c"># 卸载</span>
+powershell -ExecutionPolicy Bypass -File uninstall.ps1 -PurgeFiles</code></pre>
+</div>
+
+<div class="foot">
+  <p>dsh-win-tunnel · Windows 端操作手册 · 服务器 <code>YOUR_DOMAIN:8443</code></p>
+  <p>项目仓库 <a href="https://github.com/YOUR_ORG/dsh-win-tunnel" target="_blank" rel="noopener">github.com/MrLukezy/dsh-win-tunnel</a> · 遇到文档没覆盖的问题，把 <code>check.ps1</code> 的输出发出来定位最快。</p>
+</div>
+
+</main>
+</div>
+
+<script>
+  // 复制按钮
+  document.querySelectorAll('.code').forEach(function (block) {
+    var btn = block.querySelector('.copy');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var pre = block.querySelector('pre');
+      var text = pre ? pre.innerText : '';
+      var done = function () {
+        btn.textContent = '已复制';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = '复制'; btn.classList.remove('done'); }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+
+  // 目录高亮
+  var links = Array.prototype.slice.call(document.querySelectorAll('#nav a'));
+  var sections = links.map(function (a) { return document.querySelector(a.getAttribute('href')); }).filter(Boolean);
+  if ('IntersectionObserver' in window && sections.length) {
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        links.forEach(function (a) { a.classList.toggle('active', a.getAttribute('href') === '#' + en.target.id); });
+      });
+    }, { rootMargin: '-10% 0px -75% 0px', threshold: 0 });
+    sections.forEach(function (s) { obs.observe(s); });
+  }
+
+  // 移动端目录
+  var toggle = document.getElementById('tocToggle');
+  var side = document.getElementById('side');
+  if (toggle) {
+    toggle.addEventListener('click', function () { side.classList.toggle('open'); });
+    side.addEventListener('click', function (e) {
+      if (e.target.tagName === 'A') side.classList.remove('open');
+    });
+  }
+</script>
+</body>
+</html>

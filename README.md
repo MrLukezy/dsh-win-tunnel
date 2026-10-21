@@ -143,16 +143,21 @@ DOMAIN=203.0.113.10
 - **锁屏不影响**,但**休眠会断**。常开机请在电源设置里关掉睡眠。
 - **首启动慢**。`dsh web` 第一次会创建 profile 并装插件,几分钟属正常,`setup.ps1` 最多等 300 秒。
 - **同一时间只建议一个浏览器会话**。多个标签同时开会让 dsh 的 peer 管理变复杂。
+- **Windows 上不要用 cloud-gateway 免 token**。它靠 `journalctl` 读 launch token,Windows 没有 systemd,这一步必然失败,表现为"能登录网关、进去还是 401"。见排错第 11 节。
+- **一个 origin 只能挂一个 dsh**。DSH 的静态资源走根绝对路径,第二个实例无法挂在同一域名的子路径下,必须给它独立端口或独立子域名。见排错第 12 节。
+- **launch token 可能被日志工具显示成残串**。最可靠的做法是让 dsh 自动打开浏览器,从地址栏复制。见排错第 6 节。
 
 ## 排错
 
-见 [docs/troubleshooting.md](docs/troubleshooting.md)。最常见的三个症状:
+见 [docs/troubleshooting.md](docs/troubleshooting.md)。最常见的几个症状:
 
 | 症状 | 原因 |
 |---|---|
-| 登录后白屏、接口全 401 | nginx 改写了 `Host` 头 |
+| 选文件夹报 403 / 特权 RPC 失败 | nginx 用了 `$host` 丢了端口,或还没 token 登录 |
+| 登录后白屏、接口全 401 | nginx 改写了 `Host` 头(或丢了端口) |
 | 502 / 504 | 隧道断了,或 `TUNNEL_PORT` 两边不一致 |
 | 对话卡住不输出 | 反代开了缓冲,需 `proxy_buffering off` |
+| 网关登录成功但仍是 401 | 在 Windows 上用了 cloud-gateway,换成 token 登录 |
 
 ## License
 

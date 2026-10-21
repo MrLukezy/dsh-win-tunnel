@@ -4,37 +4,61 @@
 
 ---
 
-## 1. 登录后白屏 / 所有接口 401
+## 1. 选文件夹报 403 / 特权 RPC 失败
 
-**现象**:basic auth 输对了,页面能加载出骨架,但会话列表空、发消息报错,控制台里 `/api/*` 全是 401。
+**现象**:页面能正常打开、能对话,但一点「选择文件夹」就弹
+`transport failure for /api/host.pickDirectory: HTTP 403`;或者设置页加载不出来。
 
-**根因**:dsh 的 `browser-trust fence` 用 `Host` 与 `Origin` 做同源校验。反代一旦改写 `Host`,
-校验直接失败。源码位置:`dsh-client-connection` 的 `isTrustedApiRequest()`。
+**根因**:这是两个独立的坑,必须分开判断。
 
-**检查**:
+### 1.1 nginx 用 `$host` 丢掉了端口
 
-```bash
-grep -n "proxy_set_header Host" /etc/nginx/sites-available/dsh-win-tunnel
+`$host` 变量**不包含端口**。浏览器发出的 `Origin` 是 `https://域名:8443`,
+而 dsh 收到的 `Host` 是 `域名` —— 端口一丢就不同源,`isTrustedApiRequest()` 返回 false。
+
+```nginx
+# 错误:监听非 443 端口时端口会丢
+proxy_set_header Host $host;
+
+# 正确:保留原始 Host 头(含端口)
+proxy_set_header Host $http_host;
 ```
 
-必须是 `proxy_set_header Host $host;`。如果写成了 `127.0.0.1:13081`,改回来。
+**判断方法**:看 nginx access log 里 `POST /api/host.describe` 的状态码。
 
-**同时确认 PC 端参数带上了**:
+| 状态码 | 响应体 | 含义 |
+|---|---|---|
+| 403 | 9 字节 `forbidden` | 没过 1.1 的 Host 校验 |
+| 401 | `unauthorized` | 过了 Host,但还没登录 |
+| 200 | JSON | 这一层已通过,若仍报错看 1.2 |
+
+### 1.2 连接被判定为 non-owner peer
+
+`dsh-client-connection` 里 `pickDirectory` 这类方法要求调用者身份是 owner:
+
+```js
+if (peer.principal.kind !== "owner")
+    return new Response("forbidden", { status: 403 });
+```
+
+只有 `browserAuth.isAuthenticated(cookie)` 成立时才返回 owner peer。
+也就是说 **必须用 launch token 登录过一次**,让 dsh 种下 `dsh-auth-*` cookie。
+未登录时是 non-owner,这类特权方法一律 403。
+
+**解决**:用带 `?token=` 的地址打开一次(见第 6 节)。
+
+### 1.3 PC 端参数是否带上
 
 ```powershell
 Get-Content C:\dsh-win-tunnel\run-dsh.bat | Select-String "trusted-host"
 ```
 
-必须能看到 `--trusted-host <你的域名>`。少了它,非 loopback 的 Host 一律被拒。
+必须能看到 `--trusted-host <域名>:<端口>`。少了它,非 loopback 的 Host 一律被拒。
 
 改完两边都要重启:
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx
-```
-
-```powershell
-# PC 上重跑 setup.ps1,或手动重启 run-dsh.bat
 ```
 
 ---
@@ -150,13 +174,39 @@ Register-ScheduledTask -TaskName "DshWinTunnel-Tunnel" -Action $action -Trigger 
 
 ## 6. 找不到首次登录 token
 
+**为什么日志里可能是残串**:dsh 打印的是 `dsh web: http://...?token=xxx` 一整行。
+但如果这行经过某些终端、编辑器或日志查看器,会被显示成 `abc…xyz` 的缩写形式,
+复制下来是无效的。所以**不要完全依赖日志**。
+
+### 最可靠:从浏览器地址栏拿
+
+1. 停掉 dsh
+2. 用**不带** `--no-open` 的命令重新启动:
+
 ```powershell
-Select-String -Path C:\dsh-win-tunnel\logs\dsh-web.log -Pattern "token=" | Select-Object -Last 3
+node "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\lib\bin.js" web `
+  --host 127.0.0.1 --port 13080 `
+  --public-url https://你的域名:8443 `
+  --trusted-host 你的域名:8443
 ```
 
-拿到后拼成 `https://你的域名/?token=那串字符`,浏览器打开一次即可。
+3. dsh 会自动打开浏览器。**地址栏里的 `?token=` 后面就是完整值**,地址栏不会缩写
+4. 把 token 拼成 `https://你的域名:8443/?token=那一串`,在公网地址上打开一次
 
-**注意 token 会随 dsh 重启而变**。已种过 cookie 的浏览器不受影响;换浏览器/清 cookie 时需要重新取。
+之后 cookie 生效,不再需要 token。
+
+### 备选:从日志提取
+
+```powershell
+Select-String -Path C:\dsh-win-tunnel\logs\dsh-web.log -Pattern "dsh web:" | Select-Object -Last 1
+```
+
+### 几个要点
+
+- token 随 dsh 每次重启变化
+- 已种过 cookie 的浏览器不受影响
+- 换浏览器或清 cookie 需要重新取
+- **token 与访问域名无关** —— 同一个 dsh 进程的 token 可以用在任何 Host 下
 
 ---
 
@@ -216,3 +266,57 @@ sudo tail -f /var/log/nginx/access.log | grep dsh-win-tunnel
 
 正常请求应该看到 `200` / `401`(未带 basic auth 时)/ `101`(WebSocket 升级)。
 出现 `499` 多半是 PC 端把连接掐了,`502` 是隧道断了。
+
+---
+
+## 11. 不要在 Windows 上依赖 cloud-gateway
+
+**现象**:dsh-cloud-gateway 能登录进它自己的登录页,但进去后 dsh 仍然是 401,
+页面一直提示 `dsh web authentication required`。
+
+**根因**:cloud-gateway 换取 dsh 登录态的方式是读 systemd journal:
+
+```js
+const authedUrlProvider = () => {
+    const out = __execFileSync("journalctl", [ ... ]);
+```
+
+**Windows 没有 systemd / journalctl**,这一步直接抛错,拿不到 launch token,
+于是它无法把 `dsh-auth-*` cookie 注入到转发请求里。结果就是:登录墙能过,后端永远 401。
+
+**结论**:Windows 端不要指望用 gateway 来免 token。直接用 dsh + launch token 登录。
+
+---
+
+## 12. 为什么不能把第二个 dsh 挂在子路径
+
+**需求**:已经有一个 dsh 挂在 `https://域名/dsh`,想让第二台机器也挂成 `https://域名/dshnuc`。
+
+**结论**:做不到。原因不在 nginx 配置,而在 DSH 前端的资源路径。
+
+DSH 的入口 HTML 里资源全是**根绝对路径**:
+
+```html
+<script src="/assets/index-ClqxG24t.js"></script>
+<link href="/plugins/@deepseek-ai/...">
+```
+
+在同一个 origin(协议 + 域名 + 端口)下,浏览器请求 `/assets/xxx` 时,
+nginx 无法区分这个请求是给第一个 dsh 还是第二个的 —— 路径完全一样。
+
+> 已有的 `/dsh` 之所以能工作,是因为它**独占**了这个 origin 的
+> `/assets`、`/plugins`、`/api`。它的入口是 `/dsh/`,但资源仍走根路径,
+> 所以整个 origin 只容得下它一个。
+
+**可行的做法**:
+
+| 方案 | 地址 | 前提 |
+|---|---|---|
+| 独立端口 | `https://域名:8443` | 安全组放行该端口 |
+| 独立子域名 | `https://dshnuc.域名` | 加一条 DNS A 记录 |
+
+两者本质相同:给第二个实例一个**没人抢的 origin**。
+
+**关于用 `sub_filter` 强行改写资源前缀**:理论上能把 HTML 里的 `/assets/` 改成
+`/dshnuc/assets/`,但 DSH 前端运行时还有大量动态请求,这部分改写不完整,
+实测会在登录后崩溃。不建议走这条路。
