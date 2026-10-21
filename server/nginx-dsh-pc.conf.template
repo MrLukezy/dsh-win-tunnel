@@ -29,7 +29,7 @@ server {
 # @@HTTP_BLOCK_END@@
 
 server {
-    listen 443 ssl http2${LISTEN_OPTS};
+    listen ${LISTEN_PORT} ssl http2${LISTEN_OPTS};
     server_name ${DOMAIN};
 
     ssl_certificate     ${CERT_DIR}/fullchain.pem;

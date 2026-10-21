@@ -101,6 +101,23 @@ https://pc.example.com/?token=aBcD1234...
 - **强烈建议再加一层**:只放行你自己的出口 IP,或挂 Cloudflare Access / Tailscale。basic auth 只是最低门槛。
 - 密码与 token 不要提交进 Git。
 
+## 与已有站点共存(推荐:独立端口 + 复用证书)
+
+DSH 前端使用根绝对路径(`/assets`、`/api`、`/plugins`),所以**一个 origin(协议 + 域名 + 端口)只能承载一个 DSH 实例**。如果你的 443 已经被别的站点占用,**不要**试图把 DSH 挂到子路径下——它的资源请求会和主站的根路径资源冲突,表现为页面加载到别人的 JS、接口打到别人的后端。
+
+正确做法是给它一个**独立端口**,并复用已有证书:
+
+```bash
+# config.env
+DOMAIN=www.example.com                                    # 已解析、已有证书
+LISTEN_PORT=8443                                          # 独立端口
+CERT_DIR_OVERRIDE=/etc/letsencrypt/live/www.example.com   # 复用,完全不调用 certbot
+```
+
+访问地址即 `https://www.example.com:8443`,证书与域名匹配,浏览器不会告警。记得在云安全组放行该端口。
+
+> 这套配置不会产生 `conflicting server name` 警告,也不会改动 443 上的任何既有站点。
+
 ## 无域名部署(IP 直连 + 自签证书)
 
 `config.env` 里的 `DOMAIN` 直接填服务器公网 IP,`install.sh` 会自动切换到 IP 模式:

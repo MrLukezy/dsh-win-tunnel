@@ -83,6 +83,8 @@ AUTH_USER="${AUTH_USER:-dsh}"
 AUTH_PASS="${AUTH_PASS:-}"
 CLIENT_MAX_BODY="${CLIENT_MAX_BODY:-50m}"
 FORCE_HTTPS="${FORCE_HTTPS:-1}"
+LISTEN_PORT="${LISTEN_PORT:-443}"
+CERT_DIR_OVERRIDE="${CERT_DIR_OVERRIDE:-}"
 
 # 允许两种模式:合法域名(Let's Encrypt)或 IPv4 直连(自签证书)
 IS_IP=0
@@ -93,9 +95,19 @@ else
 fi
 [[ "${TUNNEL_PORT}" =~ ^[0-9]+$ ]] && (( TUNNEL_PORT >= 1024 && TUNNEL_PORT <= 65535 )) \
   || die "TUNNEL_PORT 必须是 1024-65535 之间的整数"
+[[ "${LISTEN_PORT}" =~ ^[0-9]+$ ]] && (( LISTEN_PORT >= 1 && LISTEN_PORT <= 65535 )) \
+  || die "LISTEN_PORT 必须是 1-65535 之间的整数"
+
+# 是否需要走 certbot(只有"域名 + 没指定复用证书 + 没跳过"时才需要)
+NEED_ACME=0
+if [[ "${IS_IP}" -eq 0 && -z "${CERT_DIR_OVERRIDE}" && "${SKIP_CERT}" -eq 0 ]]; then
+  NEED_ACME=1
+fi
 
 info "目标域名  ${C_BOLD}${DOMAIN}${C_RESET}"
+info "监听端口  ${C_BOLD}${LISTEN_PORT}${C_RESET}"
 info "隧道端口  ${C_BOLD}127.0.0.1:${TUNNEL_PORT}${C_RESET}"
+[[ -n "${CERT_DIR_OVERRIDE}" ]] && info "复用证书  ${C_BOLD}${CERT_DIR_OVERRIDE}${C_RESET}"
 
 # ---------- 隧道端口占用检查 ----------
 if ss -tlnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${TUNNEL_PORT}$"; then
@@ -126,7 +138,13 @@ fi
 # ---------- 证书 ----------
 LISTEN_OPTS=""
 
-if [[ "${IS_IP}" -eq 1 ]]; then
+if [[ -n "${CERT_DIR_OVERRIDE}" ]]; then
+  # ── 复用现有证书:适合"独立端口 + 已有域名证书"的复用场景 ──
+  [[ -f "${CERT_DIR_OVERRIDE}/fullchain.pem" && -f "${CERT_DIR_OVERRIDE}/privkey.pem" ]] \
+    || die "CERT_DIR_OVERRIDE 指向的目录缺少 fullchain.pem / privkey.pem: ${CERT_DIR_OVERRIDE}"
+  CERT_DIR="${CERT_DIR_OVERRIDE}"
+  ok "复用已有证书 ${CERT_DIR}"
+elif [[ "${IS_IP}" -eq 1 ]]; then
   # ── IP 直连:Let's Encrypt 不给 IP 签证书,只能用自签 ──
   # 浏览器会提示"连接不是私密连接",确认继续即可。自己用够用。
   CERT_DIR="/etc/ssl/dsh-tunnel"
@@ -142,8 +160,11 @@ if [[ "${IS_IP}" -eq 1 ]]; then
     chmod 600 "${CERT_DIR}/privkey.pem"
     ok "自签证书已生成 ${CERT_DIR}"
   fi
-  # 浏览器访问 IP 时不发 SNI,只能靠 default_server 接住
-  LISTEN_OPTS=" default_server"
+  # 浏览器访问 IP 时不发 SNI;只有 443 才需要 default_server 接住,
+  # 独立端口(如 8443)本身就是该端口唯一站点,不存在这个问题。
+  if [[ "${LISTEN_PORT}" -eq 443 ]]; then
+    LISTEN_OPTS=" default_server"
+  fi
 else
   # ── 域名:Let's Encrypt 正式证书 ──
   CERT_DIR="${CERT_BASE}/${DOMAIN}"
@@ -193,15 +214,15 @@ fi
 # ---------- 渲染并安装正式站点配置 ----------
 info "安装 nginx 站点配置"
 
-export DOMAIN TUNNEL_PORT CLIENT_MAX_BODY CERT_DIR AUTH_FILE LISTEN_OPTS
-envsubst '${DOMAIN} ${TUNNEL_PORT} ${CLIENT_MAX_BODY} ${CERT_DIR} ${AUTH_FILE} ${LISTEN_OPTS}' \
+export DOMAIN TUNNEL_PORT CLIENT_MAX_BODY CERT_DIR AUTH_FILE LISTEN_OPTS LISTEN_PORT
+envsubst '${DOMAIN} ${TUNNEL_PORT} ${CLIENT_MAX_BODY} ${CERT_DIR} ${AUTH_FILE} ${LISTEN_OPTS} ${LISTEN_PORT}' \
   < "${TEMPLATE_FILE}" > "${NGINX_AVAILABLE}"
 
-# IP 直连模式:删掉 80 端口那一段。同一个 IP 作为 server_name 往往已被其它站点占用,
-# 留着只会让 nginx 报 "conflicting server name ... ignored"。
-if [[ "${IS_IP}" -eq 1 ]]; then
+# 不走 certbot 时删掉 80 端口那一段:同一个 IP/域名作为 server_name 往往已被
+# 其它站点占用,留着只会让 nginx 报 "conflicting server name ... ignored"。
+if [[ "${NEED_ACME}" -eq 0 ]]; then
   sed -i '/# @@HTTP_BLOCK_START@@/,/# @@HTTP_BLOCK_END@@/d' "${NGINX_AVAILABLE}"
-  info "IP 模式:已省略 80 端口站点(避免 server_name 冲突)"
+  info "无需 ACME 验证:已省略 80 端口站点(避免 server_name 冲突)"
 fi
 
 # 非强制 HTTPS 时把 80 段的 301 去掉(保持简单:仅在需要时改)
@@ -234,12 +255,17 @@ else
 fi
 
 # ---------- 摘要 ----------
+if [[ "${LISTEN_PORT}" -eq 443 ]]; then
+  PUBLIC_ADDR="https://${DOMAIN}"
+else
+  PUBLIC_ADDR="https://${DOMAIN}:${LISTEN_PORT}"
+fi
 echo
 printf '%s┌──────────────────────────────────────────────────────────┐%s\n' "$C_GRN" "$C_RESET"
 printf '%s│  服务器端部署完成                                        │%s\n' "$C_GRN" "$C_RESET"
 printf '%s└──────────────────────────────────────────────────────────┘%s\n' "$C_GRN" "$C_RESET"
 echo
-printf '  公网地址      : %shttps://%s%s\n' "$C_BOLD" "${DOMAIN}" "$C_RESET"
+printf '  公网地址      : %s%s%s\n' "$C_BOLD" "${PUBLIC_ADDR}" "$C_RESET"
 printf '  登录墙账号    : %s%s%s\n' "$C_BOLD" "${AUTH_USER}" "$C_RESET"
 if [[ "${PASS_GENERATED}" -eq 1 ]]; then
   printf '  登录墙密码    : %s%s%s   %s(只显示这一次,请立即保存)%s\n' \
@@ -257,8 +283,8 @@ printf '    powershell -ExecutionPolicy Bypass -File setup.ps1 `\n'
 printf '      -ServerHost %s `\n' "${DOMAIN}"
 printf '      -ServerUser <你的服务器用户> `\n'
 printf '      -TunnelPort %s `\n' "${TUNNEL_PORT}"
-printf '      -PublicUrl https://%s\n' "${DOMAIN}"
+printf '      -PublicUrl %s\n' "${PUBLIC_ADDR}"
 echo
 printf '%s  首次登录记得带 token:%s token 在 PC 上 dsh web 的启动日志里,\n' "$C_BOLD" "$C_RESET"
-printf '  形如 https://%s/?token=xxxxxxxx\n' "${DOMAIN}"
+printf '  形如 %s/?token=xxxxxxxx\n' "${PUBLIC_ADDR}"
 echo
