@@ -84,7 +84,13 @@ AUTH_PASS="${AUTH_PASS:-}"
 CLIENT_MAX_BODY="${CLIENT_MAX_BODY:-50m}"
 FORCE_HTTPS="${FORCE_HTTPS:-1}"
 
-[[ "${DOMAIN}" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "DOMAIN 格式不对: ${DOMAIN}"
+# 允许两种模式:合法域名(Let's Encrypt)或 IPv4 直连(自签证书)
+IS_IP=0
+if [[ "${DOMAIN}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  IS_IP=1
+else
+  [[ "${DOMAIN}" =~ ^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "DOMAIN 格式不对: ${DOMAIN}"
+fi
 [[ "${TUNNEL_PORT}" =~ ^[0-9]+$ ]] && (( TUNNEL_PORT >= 1024 && TUNNEL_PORT <= 65535 )) \
   || die "TUNNEL_PORT 必须是 1024-65535 之间的整数"
 
@@ -118,7 +124,29 @@ if [[ "${AUTH_PASS}" != "__KEEP_EXISTING__" ]]; then
 fi
 
 # ---------- 证书 ----------
-CERT_DIR="${CERT_BASE}/${DOMAIN}"
+LISTEN_OPTS=""
+
+if [[ "${IS_IP}" -eq 1 ]]; then
+  # ── IP 直连:Let's Encrypt 不给 IP 签证书,只能用自签 ──
+  # 浏览器会提示"连接不是私密连接",确认继续即可。自己用够用。
+  CERT_DIR="/etc/ssl/dsh-tunnel"
+  mkdir -p "${CERT_DIR}"
+  if [[ -f "${CERT_DIR}/fullchain.pem" && -f "${CERT_DIR}/privkey.pem" ]]; then
+    ok "复用已有自签证书 ${CERT_DIR}"
+  else
+    info "生成自签证书(有效期 10 年)"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+      -keyout "${CERT_DIR}/privkey.pem" -out "${CERT_DIR}/fullchain.pem" \
+      -subj "/CN=${DOMAIN}" -addext "subjectAltName=IP:${DOMAIN}" >/dev/null 2>&1 \
+      || die "自签证书生成失败"
+    chmod 600 "${CERT_DIR}/privkey.pem"
+    ok "自签证书已生成 ${CERT_DIR}"
+  fi
+  # 浏览器访问 IP 时不发 SNI,只能靠 default_server 接住
+  LISTEN_OPTS=" default_server"
+else
+  # ── 域名:Let's Encrypt 正式证书 ──
+  CERT_DIR="${CERT_BASE}/${DOMAIN}"
 
 if [[ "${SKIP_CERT}" -eq 1 ]]; then
   [[ -f "${CERT_DIR}/fullchain.pem" ]] || die "--skip-cert 指定了,但 ${CERT_DIR} 下没有证书"
@@ -160,13 +188,21 @@ EOF
   rm -f "/etc/nginx/sites-enabled/${SITE_NAME}.acme-tmp" "${TMP_SITE}"
   ok "证书已签发: ${CERT_DIR}"
 fi
+fi
 
 # ---------- 渲染并安装正式站点配置 ----------
 info "安装 nginx 站点配置"
 
-export DOMAIN TUNNEL_PORT CLIENT_MAX_BODY CERT_DIR AUTH_FILE
-envsubst '${DOMAIN} ${TUNNEL_PORT} ${CLIENT_MAX_BODY} ${CERT_DIR} ${AUTH_FILE}' \
+export DOMAIN TUNNEL_PORT CLIENT_MAX_BODY CERT_DIR AUTH_FILE LISTEN_OPTS
+envsubst '${DOMAIN} ${TUNNEL_PORT} ${CLIENT_MAX_BODY} ${CERT_DIR} ${AUTH_FILE} ${LISTEN_OPTS}' \
   < "${TEMPLATE_FILE}" > "${NGINX_AVAILABLE}"
+
+# IP 直连模式:删掉 80 端口那一段。同一个 IP 作为 server_name 往往已被其它站点占用,
+# 留着只会让 nginx 报 "conflicting server name ... ignored"。
+if [[ "${IS_IP}" -eq 1 ]]; then
+  sed -i '/# @@HTTP_BLOCK_START@@/,/# @@HTTP_BLOCK_END@@/d' "${NGINX_AVAILABLE}"
+  info "IP 模式:已省略 80 端口站点(避免 server_name 冲突)"
+fi
 
 # 非强制 HTTPS 时把 80 段的 301 去掉(保持简单:仅在需要时改)
 if [[ "${FORCE_HTTPS}" != "1" ]]; then
@@ -177,17 +213,24 @@ fi
 ln -sfn "${NGINX_AVAILABLE}" "${NGINX_ENABLED}"
 
 if ! nginx -t; then
-  die "nginx 配置校验失败,已保留原配置。请检查 ${NGINX_AVAILABLE}"
+  # 校验失败立刻回滚,避免把坏配置留在 sites-enabled 里
+  rm -f "${NGINX_ENABLED}" "${NGINX_AVAILABLE}"
+  die "nginx 配置校验失败,已自动回滚。常见原因:443 上已有别的 default_server,
+或 ${TUNNEL_PORT} 与现有站点冲突。"
 fi
 systemctl reload nginx
 ok "nginx 已重载"
 
 # ---------- 续期钩子 ----------
-info "确认证书自动续期"
-if systemctl list-timers 2>/dev/null | grep -q certbot; then
-  ok "certbot 定时续期已启用"
+if [[ "${IS_IP}" -eq 0 ]]; then
+  info "确认证书自动续期"
+  if systemctl list-timers 2>/dev/null | grep -q certbot; then
+    ok "certbot 定时续期已启用"
+  else
+    warn "没检测到 certbot timer,请确认续期任务存在,否则 90 天后会过期"
+  fi
 else
-  warn "没检测到 certbot timer,请确认续期任务存在,否则 90 天后会过期"
+  info "自签证书有效期 10 年,无需续期"
 fi
 
 # ---------- 摘要 ----------

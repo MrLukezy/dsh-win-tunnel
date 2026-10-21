@@ -10,6 +10,9 @@ map $http_upgrade $dsh_tunnel_connection {
     ''      close;
 }
 
+# @@HTTP_BLOCK_START@@
+# 这一段只在域名模式(Let's Encrypt 需要 80 端口做验证)下保留;
+# IP 直连模式下 install.sh 会整段删除,避免与已有站点的 server_name 冲突。
 server {
     listen 80;
     server_name ${DOMAIN};
@@ -23,9 +26,10 @@ server {
         return 301 https://$host$request_uri;
     }
 }
+# @@HTTP_BLOCK_END@@
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl http2${LISTEN_OPTS};
     server_name ${DOMAIN};
 
     ssl_certificate     ${CERT_DIR}/fullchain.pem;

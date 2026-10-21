@@ -101,15 +101,24 @@ https://pc.example.com/?token=aBcD1234...
 - **强烈建议再加一层**:只放行你自己的出口 IP,或挂 Cloudflare Access / Tailscale。basic auth 只是最低门槛。
 - 密码与 token 不要提交进 Git。
 
-## 无域名部署
+## 无域名部署(IP 直连 + 自签证书)
 
-没有域名也能用,代价是浏览器会报证书警告:
+`config.env` 里的 `DOMAIN` 直接填服务器公网 IP,`install.sh` 会自动切换到 IP 模式:
+
+- 不再调用 certbot,改为在 `/etc/ssl/dsh-tunnel/` 生成 **10 年有效**的自签证书
+- 443 站点标记为 `default_server`——浏览器访问 IP 时**不发送 SNI**,只能靠默认站点接住
+- 自动省略 80 端口站点,避免与已占用该 IP 的其它站点产生 `conflicting server name`
+
+代价是浏览器首次访问会提示「连接不是私密连接」,点「继续前往」即可。手机上同样可以继续访问。
 
 ```bash
-# config.env 里 DOMAIN 填服务器公网 IP,install.sh 会改用自签证书
+# config.env
+DOMAIN=203.0.113.10
 ```
 
-实际更省事的做法是给 IP 单独签一张自签证书,或者直接用 Cloudflare Tunnel(`cloudflared tunnel`)——它连端口都不用开,自带 TLS 与 Access 认证,只是需要域名托管在 Cloudflare。
+之后如果想换成正式证书,只需要把 `DOMAIN` 改成已解析的域名,重新执行一次 `install.sh`——nginx 站点会被重写,但隧道与 Windows 端配置无需改动。
+
+另一种彻底免端口、免证书的方案是 Cloudflare Tunnel(`cloudflared tunnel`),但需要域名托管在 Cloudflare。
 
 ## 已知限制
 
