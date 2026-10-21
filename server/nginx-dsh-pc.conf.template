@@ -50,10 +50,14 @@ server {
         proxy_pass http://127.0.0.1:${TUNNEL_PORT};
         proxy_http_version 1.1;
 
-        # ★★ Host 必须原样透传,绝对不能改成 127.0.0.1 ★★
-        #    dsh 的 browser-trust fence 用 Host 与 Origin 做同源校验,
-        #    改写 Host 会让 /api 全线 401,表现为"登录后白屏"。
-        proxy_set_header Host              $host;
+        # ★★ Host 必须原样透传,且必须带端口 ★★
+        #    dsh 的 browser-trust fence 用 Host 与 Origin 做同源校验。
+        #    这里必须用 $http_host(原始 Host 头,含端口),不能用 $host ——
+        #    $host 会丢掉端口:浏览器 Origin 是 https://域名:8443,
+        #    而 dsh 收到 Host=域名,两者不同源,isTrusted() 直接 false,
+        #    表现为 host.describe / host.pickDirectory 等特权 RPC 全部 403
+        #    (页面能开、能对话,但一选目录就报 transport failure)。
+        proxy_set_header Host              $http_host;
         proxy_set_header Upgrade           $http_upgrade;
         proxy_set_header Connection        $dsh_tunnel_connection;
         proxy_set_header X-Real-IP         $remote_addr;
